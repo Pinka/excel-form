@@ -54,6 +54,11 @@
               };
             });
 
+            // Remove the existing Handsontable instance if it exists
+            if (hot) {
+              hot.destroy();
+            }
+
             initializeHandsontable(json, hotMerges);
 
             // Generate cell IDs after initialization
