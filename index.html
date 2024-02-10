@@ -11,16 +11,20 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
   </head>
   <body>
-    <input type="file" id="input-excel" accept=".xlsx, .xls" />
-    <button id="save-state">Save State</button>
-    <button id="load-state">Load State</button>
-    <label><input type="checkbox" id="employee-mode" /> Employee Mode</label>
-    <button id="save-employee-state" style="display: none">
-      Save Employee State
+    <label for="input-excel"
+      >Load Excel File
+      <input type="file" id="input-excel" accept=".xlsx, .xls" />
+    </label>
+    <button id="load-state">Load template</button>
+    <button id="save-state" style="display: none">Save Template</button>
+    <br />
+    <label style="display: none" for="read-only-mode">
+      <input type="checkbox" id="read-only-mode" /> ReadOnly Mode
+    </label>
+    <button id="save-read-only-state" style="display: none">
+      Save ReadOnly State
     </button>
-    <button id="load-employee-state" style="display: none">
-      Load Employee State
-    </button>
+
     <div id="hot"></div>
 
     <script>
@@ -51,6 +55,26 @@
             });
 
             initializeHandsontable(json, hotMerges);
+
+            // Generate cell IDs after initialization
+            json.forEach((row, rowIndex) => {
+              row.forEach((cell, colIndex) => {
+                hot.setCellMeta(
+                  rowIndex,
+                  colIndex,
+                  "id",
+                  generateUniqueCellId()
+                );
+              });
+            });
+
+            // show read-only mode checkbox
+            document.getElementById(
+              "read-only-mode"
+            ).parentElement.style.display = "";
+
+            // show save state button
+            document.getElementById("save-state").style.display = "";
           };
 
           if (e.target.files.length > 0) {
@@ -63,13 +87,17 @@
         .getElementById("save-state")
         .addEventListener("click", function () {
           if (hot) {
-            var data = hot.getData();
+            var data = hot.getData().map(function (row, rowIndex) {
+              return row.map(function (cell, colIndex) {
+                return {
+                  id: hot.getCellMeta(rowIndex, colIndex).id,
+                  value: cell,
+                };
+              });
+            });
             var mergeCells =
               hot.getPlugin("mergeCells").mergedCellsCollection.mergedCells;
-            var state = {
-              data: data,
-              mergeCells: mergeCells,
-            };
+            var state = { data: data, mergeCells: mergeCells };
             localStorage.setItem("handsontableState", JSON.stringify(state));
             alert("State saved!");
           }
@@ -80,80 +108,115 @@
         .addEventListener("click", function () {
           var state = JSON.parse(localStorage.getItem("handsontableState"));
           if (state) {
-            initializeHandsontable(state.data, state.mergeCells);
+            // Remove the existing Handsontable instance if it exists
+            if (hot) {
+              hot.destroy();
+            }
+
+            // Convert state back to the format Handsontable expects, ensuring IDs are retained
+            var data = state.data.map((row) => row.map((cell) => cell.value));
+            initializeHandsontable(data, state.mergeCells);
+
+            // Apply cell IDs after initialization
+            state.data.forEach((row, rowIndex) => {
+              row.forEach((cell, colIndex) => {
+                hot.setCellMeta(rowIndex, colIndex, "id", cell.id);
+              });
+            });
+
+            hot.render();
+
+            // show read-only mode checkbox
+            document.getElementById(
+              "read-only-mode"
+            ).parentElement.style.display = "";
+
+            // show save state button
+            document.getElementById("save-state").style.display = "";
           } else {
             alert("No saved state found!");
           }
         });
 
       document
-        .getElementById("employee-mode")
-        .addEventListener("change", function (e) {
-          const isReadOnly = e.target.checked;
-          hot.updateSettings({
-            readOnly: isReadOnly,
-            // Dynamically enable or disable the context menu based on Employee Mode
-            contextMenu: !isReadOnly,
-          });
-
-          document.getElementById("save-employee-state").style.display =
-            isReadOnly ? "" : "none";
-          document.getElementById("load-employee-state").style.display =
-            isReadOnly ? "" : "none";
-
-          if (isReadOnly) {
-            // Enable custom click handler for color change in read-only mode
-            hot.addHook("afterOnCellMouseDown", changeCellColor);
-          } else {
-            // Remove custom click handler when not in read-only mode
-            hot.removeHook("afterOnCellMouseDown", changeCellColor);
-          }
-        });
+        .getElementById("read-only-mode")
+        .addEventListener("change", toggleReadOnlyMode);
 
       document
-        .getElementById("save-employee-state")
-        .addEventListener("click", function () {
-          const colorState = [];
-          for (let row = 0; row < hot.countRows(); row++) {
-            for (let col = 0; col < hot.countCols(); col++) {
-              const cellStyle = hot.getCellMeta(row, col).style;
-              if (cellStyle && cellStyle.backgroundColor) {
-                colorState.push({
-                  row,
-                  col,
-                  backgroundColor: cellStyle.backgroundColor,
-                });
+        .getElementById("save-read-only-state")
+        .addEventListener("click", saveReadOnlyState);
+
+      function toggleReadOnlyMode() {
+        const isReadOnly = !hot.getSettings().readOnly;
+        hot.updateSettings({
+          readOnly: isReadOnly,
+          contextMenu: !isReadOnly,
+          dropdownMenu: !isReadOnly,
+        });
+
+        document.getElementById("save-read-only-state").style.display =
+          isReadOnly ? "" : "none";
+
+        if (isReadOnly) {
+          loadReadOnlyState();
+          // Enable custom click handler for color change in read-only mode
+          hot.addHook("afterOnCellMouseDown", changeCellColor);
+        } else {
+          // Remove custom click handler when not in read-only mode
+          hot.removeHook("afterOnCellMouseDown", changeCellColor);
+        }
+      }
+
+      function loadReadOnlyState() {
+        const colorState = JSON.parse(
+          localStorage.getItem("handsontableReadOnlyState")
+        );
+        if (colorState) {
+          // Clear existing styles to avoid conflicts
+          hot.render(); // Ensure the table is up-to-date before applying styles
+
+          // Apply the saved color state directly
+          colorState.forEach(({ id, backgroundColor }) => {
+            for (let row = 0; row < hot.countRows(); row++) {
+              for (let col = 0; col < hot.countCols(); col++) {
+                const meta = hot.getCellMeta(row, col);
+                if (meta.id && meta.id === id) {
+                  hot.setCellMeta(row, col, "style", {
+                    backgroundColor: backgroundColor,
+                  });
+
+                  const cell = hot.getCell(row, col);
+                  cell.style.backgroundColor = backgroundColor;
+                }
               }
             }
-          }
-          localStorage.setItem(
-            "handsontableEmployeeState",
-            JSON.stringify(colorState)
-          );
-          alert("Employee state saved!");
-        });
+          });
+        }
+      }
 
-      document
-        .getElementById("load-employee-state")
-        .addEventListener("click", function () {
-          const colorState = JSON.parse(
-            localStorage.getItem("handsontableEmployeeState")
-          );
-          console.log(colorState);
-          if (colorState) {
-            colorState.forEach(({ row, col, backgroundColor }) => {
-              const cell = hot.getCell(row, col);
-              if (cell) {
-                cell.style.backgroundColor = backgroundColor;
-                hot.setCellMeta(row, col, "style", {
-                  backgroundColor: backgroundColor,
-                });
-              }
-            });
-          } else {
-            alert("No saved employee state found!");
+      function saveReadOnlyState() {
+        const colorState = [];
+        for (let row = 0; row < hot.countRows(); row++) {
+          for (let col = 0; col < hot.countCols(); col++) {
+            const cellMeta = hot.getCellMeta(row, col);
+            if (
+              cellMeta.id &&
+              cellMeta.style &&
+              cellMeta.style.backgroundColor
+            ) {
+              colorState.push({
+                id: cellMeta.id, // Associate color state with cell ID
+                backgroundColor: cellMeta.style.backgroundColor,
+              });
+            }
           }
-        });
+        }
+        localStorage.setItem(
+          "handsontableReadOnlyState",
+          JSON.stringify(colorState)
+        );
+        alert("ReadOnly color state saved!");
+      }
 
       function changeCellColor(event, coords, TD) {
         // Check if the click is a left click (button 0). If not, return immediately.
@@ -163,6 +226,9 @@
         let currentColor = TD.style.backgroundColor;
         let nextColorIndex = (colors.indexOf(currentColor) + 1) % colors.length;
         let nextColor = colors[nextColorIndex];
+
+        // do nothing if clicked on the header
+        if (coords.row < 0 || coords.col < 0) return;
 
         // Apply the next color
         TD.style.backgroundColor = nextColor;
@@ -188,8 +254,43 @@
           manualColumnResize: true,
           stretchH: "all",
           mergeCells: mergeCells,
-          outsideClickDeselects: false, // Keep cell selected after outside click
+          afterCreateRow: function (index, amount) {
+            for (let i = 0; i < amount; i++) {
+              let rowIndex = index + i;
+              for (let colIndex = 0; colIndex < this.countCols(); colIndex++) {
+                if (!this.getCellMeta(rowIndex, colIndex).id) {
+                  this.setCellMeta(
+                    rowIndex,
+                    colIndex,
+                    "id",
+                    generateUniqueCellId()
+                  );
+                }
+              }
+            }
+          },
+          afterCreateCol: function (index, amount) {
+            for (let i = 0; i < amount; i++) {
+              let colIndex = index + i;
+              for (let rowIndex = 0; rowIndex < this.countRows(); rowIndex++) {
+                if (!this.getCellMeta(rowIndex, colIndex).id) {
+                  this.setCellMeta(
+                    rowIndex,
+                    colIndex,
+                    "id",
+                    generateUniqueCellId()
+                  );
+                }
+              }
+            }
+          },
         });
+      }
+
+      function generateUniqueCellId() {
+        return `cell-${
+          Date.now().toString(36) + Math.random().toString(36).substr(2)
+        }`;
       }
     </script>
   </body>
