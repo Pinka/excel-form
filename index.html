@@ -45,14 +45,15 @@
             var json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
             var merges = worksheet["!merges"];
 
-            var hotMerges = merges.map(function (merge) {
-              return {
-                row: merge.s.r,
-                col: merge.s.c,
-                rowspan: merge.e.r - merge.s.r + 1,
-                colspan: merge.e.c - merge.s.c + 1,
-              };
-            });
+            var hotMerges =
+              merges?.map(function (merge) {
+                return {
+                  row: merge.s.r,
+                  col: merge.s.c,
+                  rowspan: merge.e.r - merge.s.r + 1,
+                  colspan: merge.e.c - merge.s.c + 1,
+                };
+              }) ?? [];
 
             // Remove the existing Handsontable instance if it exists
             if (hot) {
