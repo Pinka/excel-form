@@ -55,15 +55,17 @@
                 };
               }) ?? [];
 
+            var hotData = normalizeData(json);
+
             // Remove the existing Handsontable instance if it exists
             if (hot) {
               hot.destroy();
             }
 
-            initializeHandsontable(json, hotMerges);
+            initializeHandsontable(hotData, hotMerges);
 
             // Generate cell IDs after initialization
-            json.forEach((row, rowIndex) => {
+            hotData.forEach((row, rowIndex) => {
               row.forEach((cell, colIndex) => {
                 hot.setCellMeta(
                   rowIndex,
@@ -152,6 +154,22 @@
         .getElementById("save-read-only-state")
         .addEventListener("click", saveReadOnlyState);
 
+      function normalizeData(data) {
+        // Determine the max length of any row
+        const maxLength = data.reduce(
+          (max, row) => Math.max(max, row.length),
+          0
+        );
+
+        // Ensure all rows have the same length
+        return data.map((row) => {
+          while (row.length < maxLength) {
+            row.push(""); // Add empty strings to make rows equal in length
+          }
+          return row;
+        });
+      }
+
       function toggleReadOnlyMode() {
         const isReadOnly = !hot.getSettings().readOnly;
         hot.updateSettings({
@@ -171,6 +189,8 @@
           // Remove custom click handler when not in read-only mode
           hot.removeHook("afterOnCellMouseDown", changeCellColor);
         }
+
+        hot.render();
       }
 
       function loadReadOnlyState() {
@@ -178,9 +198,6 @@
           localStorage.getItem("handsontableReadOnlyState")
         );
         if (colorState) {
-          // Clear existing styles to avoid conflicts
-          hot.render(); // Ensure the table is up-to-date before applying styles
-
           // Apply the saved color state directly
           colorState.forEach(({ id, backgroundColor }) => {
             for (let row = 0; row < hot.countRows(); row++) {
@@ -190,13 +207,12 @@
                   hot.setCellMeta(row, col, "style", {
                     backgroundColor: backgroundColor,
                   });
-
-                  const cell = hot.getCell(row, col);
-                  cell.style.backgroundColor = backgroundColor;
                 }
               }
             }
           });
+
+          hot.render();
         }
       }
 
@@ -229,20 +245,21 @@
         if (event.button !== 0) return;
 
         const colors = ["yellow", "green", ""];
-        let currentColor = TD.style.backgroundColor;
+        const metadata = hot.getCellMeta(coords.row, coords.col);
+        let currentColor = metadata?.style?.backgroundColor ?? "";
         let nextColorIndex = (colors.indexOf(currentColor) + 1) % colors.length;
         let nextColor = colors[nextColorIndex];
 
         // do nothing if clicked on the header
         if (coords.row < 0 || coords.col < 0) return;
 
-        // Apply the next color
-        TD.style.backgroundColor = nextColor;
-
         // Save the color directly into cell meta for persistence
         hot.setCellMeta(coords.row, coords.col, "style", {
           backgroundColor: nextColor,
         });
+
+        // Ensure to re-render the table if immediate visual update is required
+        hot.render();
 
         // Prevent entering edit mode or any default action
         event.stopImmediatePropagation();
@@ -291,7 +308,32 @@
               }
             }
           },
+          cells: function (row, col, prop) {
+            this.renderer = customRenderer;
+          },
         });
+      }
+
+      function customRenderer(
+        instance,
+        TD,
+        row,
+        col,
+        prop,
+        value,
+        cellProperties
+      ) {
+        // Call the original renderer (You can choose another base renderer depending on your needs)
+        Handsontable.renderers.TextRenderer.apply(this, arguments);
+
+        // Check if there's style metadata for the current cell
+        if (cellProperties.style) {
+          Object.keys(cellProperties.style).forEach((key) => {
+            TD.style[key] = hot.getSettings().readOnly
+              ? cellProperties.style[key]
+              : undefined;
+          });
+        }
       }
 
       function generateUniqueCellId() {
