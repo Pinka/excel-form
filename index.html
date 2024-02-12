@@ -40,8 +40,19 @@
               type: "binary",
             });
 
-            var firstSheetName = workbook.SheetNames[0];
-            var worksheet = workbook.Sheets[firstSheetName];
+            var firstVisibleSheetName = null;
+
+            for (var sheetName in workbook.Sheets) {
+              if (
+                !workbook.Workbook.Sheets.find((s) => s.name === sheetName)
+                  .Hidden
+              ) {
+                firstVisibleSheetName = sheetName;
+                break;
+              }
+            }
+
+            var worksheet = workbook.Sheets[firstVisibleSheetName];
             var json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
             var merges = worksheet["!merges"];
 
